@@ -63,6 +63,17 @@
     <!-- Tous les livres -->
     <section>
       <h2>Liste des livres</h2>
+      
+      <!-- Barre de recherche -->
+      <div class="search-bar-wrapper">
+        <input 
+          type="text" 
+          id="searchInput" 
+          placeholder="🔍 Rechercher un livre par titre ou auteur..." 
+          oninput="renderBookList()"
+        >
+      </div>
+
       <div id="bookList"></div>
     </section>
 
@@ -79,6 +90,18 @@
           <input type="number" id="hoursPerDay" step="0.1" min="0.1">
         </div>
         <button onclick="saveSettings()">Enregistrer</button>
+      </div>
+    </section>
+
+    <!-- Sauvegarde & Importation -->
+    <section>
+      <h2>Sauvegarde des données</h2>
+      <div class="settings-row">
+        <button onclick="exportData()">Télécharger une sauvegarde (.json)</button>
+        <label class="ghost" style="padding: 9px 16px; border: 1px solid var(--line); cursor: pointer; display: inline-block;">
+          Importer une sauvegarde
+          <input type="file" id="importFile" onchange="importData(event)" accept=".json" style="display:none;">
+        </label>
       </div>
     </section>
 
@@ -124,7 +147,6 @@
   <script>
     const STORAGE_KEY = 'shelf-library-data';
     
-    // Hex colors for immediate cross-browser gradient support
     const PALETTE = [
       '#7B2D3E', '#2C6E6B', '#B4552D', '#34495E',
       '#8A6D1F', '#4B3B47', '#2A4D69', '#8E44AD',
@@ -209,8 +231,10 @@
 
       if(shelfChoice === 'completed'){
         initialPage = pages;
+        if(!endDate) endDate = todayKey();
       } else if(shelfChoice === 'reading'){
         initialPage = 1;
+        if(!startDate) startDate = todayKey();
       }
       
       data.books.push({ 
@@ -252,6 +276,10 @@
         book.endDate = null;
       }
 
+      if(newVal > 0 && !book.startDate){
+        book.startDate = todayKey();
+      }
+
       book.currentPage = newVal;
 
       if(delta !== 0){
@@ -275,6 +303,7 @@
       const remaining = book.pages - book.currentPage;
 
       book.endDate = todayKey();
+      if(!book.startDate) book.startDate = todayKey();
       book.currentPage = book.pages;
       
       if(remaining > 0){
@@ -340,6 +369,39 @@
       render();
     }
 
+    function exportData() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `ma-bibliotheque-backup-${todayKey()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function importData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const importedData = JSON.parse(e.target.result);
+          if (importedData.books && Array.isArray(importedData.books)) {
+            data = importedData;
+            save();
+            render();
+            alert('Données importées avec succès !');
+          } else {
+            alert('Fichier de sauvegarde invalide.');
+          }
+        } catch (err) {
+          alert('Erreur lors de la lecture du fichier.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
     function computeStats(){
       const totalPages = data.books.reduce((s,b) => s + b.pages, 0);
       const readPages = data.books.reduce((s,b) => s + b.currentPage, 0);
@@ -400,6 +462,86 @@
       </div>`;
     }
 
+    function renderBookList(){
+      const bookList = document.getElementById('bookList');
+      const searchInput = document.getElementById('searchInput');
+      const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+      if(data.books.length === 0){
+        bookList.innerHTML = '<p class="empty-note">Aucun livre enregistré.</p>';
+        return;
+      }
+
+      // 1. Sort books: "Reading" at the top, "To Read" in middle, "Completed" at the bottom
+      const sortedBooks = [...data.books].sort((a, b) => {
+        const getPriority = (book) => {
+          if (book.currentPage >= book.pages && book.pages > 0) return 3; // Finished -> Bottom
+          if (book.currentPage > 0) return 1;                            // Reading -> Top
+          return 2;                                                      // To Read -> Middle
+        };
+        return getPriority(a) - getPriority(b);
+      });
+
+      // 2. Filter by search query
+      const filteredBooks = sortedBooks.filter(b => {
+        const titleMatch = b.title.toLowerCase().includes(query);
+        const authorMatch = b.author ? b.author.toLowerCase().includes(query) : false;
+        return titleMatch || authorMatch;
+      });
+
+      if(filteredBooks.length === 0){
+        bookList.innerHTML = '<p class="empty-note">Aucun livre ne correspond à votre recherche.</p>';
+        return;
+      }
+
+      bookList.innerHTML = filteredBooks.map(b => {
+        const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
+        const finished = b.currentPage >= b.pages && b.pages > 0;
+        
+        let dateInfo = '';
+        if(finished){
+          if(b.startDate && b.endDate){
+            dateInfo = ` • Lu du ${b.startDate} au ${b.endDate}`;
+          } else if(b.endDate){
+            dateInfo = ` • Terminé le ${b.endDate}`;
+          } else if(b.startDate){
+            dateInfo = ` • Débuté le ${b.startDate}`;
+          }
+        } else if(b.startDate){
+          dateInfo = ` • Débuté le ${b.startDate}`;
+        }
+
+        const authorText = b.author ? ` <span class="author-text">par ${escapeHtml(b.author)}</span>` : '';
+
+        return `<div class="book-row">
+          <div class="info">
+            <h4>${escapeHtml(b.title)}${authorText}</h4>
+            <div class="meta">${finished ? 'Terminé' : pct + '% lu'} — page ${b.currentPage} sur ${b.pages}${dateInfo}</div>
+            <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          </div>
+          <div class="controls">
+            <label for="page-${b.id}">Page :</label>
+            <input type="number" id="page-${b.id}" value="${b.currentPage}" min="0" max="${b.pages}">
+            
+            <label>Durée :</label>
+            <div class="time-input-group">
+              <input type="number" id="time-${b.id}" placeholder="0" min="0" step="any">
+              <select id="unit-${b.id}">
+                <option value="minutes">min</option>
+                <option value="hours">heures</option>
+              </select>
+            </div>
+
+            <button class="secondary" onclick="setCurrentPage('${b.id}')">Mettre à jour</button>
+          </div>
+          <div class="row-actions">
+            <button class="ghost" onclick="markDone('${b.id}')">Terminer</button>
+            <button class="ghost" onclick="deleteBook('${b.id}')">Supprimer</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
     function render(){
       const stats = computeStats();
       const total = data.books.length;
@@ -442,57 +584,7 @@
         ? completedBooks.map(b => createSpineHtml(b)).join('') 
         : '<div class="shelf-empty">Aucun livre terminé pour le moment.</div>';
 
-      const bookList = document.getElementById('bookList');
-      if(total === 0){
-        bookList.innerHTML = '<p class="empty-note">Aucun livre enregistré.</p>';
-      } else {
-        bookList.innerHTML = data.books.map(b => {
-          const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
-          const finished = b.currentPage >= b.pages;
-          
-          let dateInfo = '';
-          if(finished){
-            if(b.startDate && b.endDate){
-              dateInfo = ` • Lu du ${b.startDate} au ${b.endDate}`;
-            } else if(b.endDate){
-              dateInfo = ` • Terminé le ${b.endDate}`;
-            } else if(b.startDate){
-              dateInfo = ` • Débuté le ${b.startDate}`;
-            }
-          } else if(b.startDate){
-            dateInfo = ` • Débuté le ${b.startDate}`;
-          }
-
-          const authorText = b.author ? ` <span class="author-text">par ${escapeHtml(b.author)}</span>` : '';
-
-          return `<div class="book-row">
-            <div class="info">
-              <h4>${escapeHtml(b.title)}${authorText}</h4>
-              <div class="meta">${finished ? 'Terminé' : pct + '% lu'} — page ${b.currentPage} sur ${b.pages}${dateInfo}</div>
-              <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
-            </div>
-            <div class="controls">
-              <label for="page-${b.id}">Page :</label>
-              <input type="number" id="page-${b.id}" value="${b.currentPage}" min="0" max="${b.pages}">
-              
-              <label>Durée :</label>
-              <div class="time-input-group">
-                <input type="number" id="time-${b.id}" placeholder="0" min="0" step="any">
-                <select id="unit-${b.id}">
-                  <option value="minutes">min</option>
-                  <option value="hours">heures</option>
-                </select>
-              </div>
-
-              <button class="secondary" onclick="setCurrentPage('${b.id}')">Mettre à jour</button>
-            </div>
-            <div class="row-actions">
-              <button class="ghost" onclick="markDone('${b.id}')">Terminer</button>
-              <button class="ghost" onclick="deleteBook('${b.id}')">Supprimer</button>
-            </div>
-          </div>`;
-        }).join('');
-      }
+      renderBookList();
 
       document.getElementById('pagesPerHour').value = data.settings.pagesPerHour;
       document.getElementById('hoursPerDay').value = data.settings.hoursPerDay;
