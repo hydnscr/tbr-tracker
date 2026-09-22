@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ma Bibliothèque</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="wrap">
+    <h1>Ma Bibliothèque</h1>
+    <div class="subhead">Suivez votre progression de lecture et gérez vos étagères.</div>
+
+    <!-- Tableau de bord -->
+    <section>
+      <h2>Tableau de bord</h2>
+      <div class="stats" id="stats"></div>
+      <div class="finish-block" id="finishBlock"></div>
+    </section>
+
+    <!-- Étagères -->
+    <section>
+      <h2>En cours de lecture</h2>
+      <div class="shelf-board" id="shelfReading"></div>
+    </section>
+
+    <section>
+      <h2>À lire</h2>
+      <div class="shelf-board" id="shelfToRead"></div>
+    </section>
+
+    <section>
+      <h2>Terminés</h2>
+      <div class="shelf-board" id="shelfCompleted"></div>
+    </section>
+
+    <!-- Ajouter un livre -->
+    <section>
+      <h2>Ajouter un livre</h2>
+      <div class="add-form">
+        <input type="text" id="newTitle" placeholder="Titre du livre">
+        <input type="text" id="newAuthor" placeholder="Auteur (optionnel)">
+        <input type="number" id="newPages" placeholder="Pages" min="1">
+        
+        <select id="newShelf" onchange="toggleDateFields()">
+          <option value="toRead">À lire</option>
+          <option value="reading">En cours</option>
+          <option value="completed">Terminé</option>
+        </select>
+
+        <span id="startDateWrapper" style="display:none;">
+          <input type="date" id="newStartDate" title="Date de début">
+        </span>
+        <span id="endDateWrapper" style="display:none;">
+          <input type="date" id="newEndDate" title="Date de fin">
+        </span>
+
+        <button onclick="addBook()">Ajouter</button>
+      </div>
+    </section>
+
+    <!-- Tous les livres -->
+    <section>
+      <h2>Liste des livres</h2>
+      <div id="bookList"></div>
+    </section>
+
+    <!-- Paramètres -->
+    <section>
+      <h2>Paramètres de lecture</h2>
+      <div class="settings-row">
+        <div class="field">
+          <label for="pagesPerHour">Vitesse estimée (pages/heure)</label>
+          <input type="number" id="pagesPerHour" min="1">
+        </div>
+        <div class="field">
+          <label for="hoursPerDay">Temps quotidien (heures/jour)</label>
+          <input type="number" id="hoursPerDay" step="0.1" min="0.1">
+        </div>
+        <button onclick="saveSettings()">Enregistrer</button>
+      </div>
+    </section>
+
+    <footer>
+      Ma Bibliothèque Personnelle
+    </footer>
+  </div>
+
+  <!-- Modal d'édition -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal-content">
+      <h3>Modifier le livre</h3>
+      <input type="hidden" id="editBookId">
+      
+      <label>
+        Titre:
+        <input type="text" id="editTitle">
+      </label>
+      <label>
+        Auteur:
+        <input type="text" id="editAuthor">
+      </label>
+      <label>
+        Nombre de pages:
+        <input type="number" id="editPages" min="1">
+      </label>
+      <label>
+        Date de début:
+        <input type="date" id="editStartDate">
+      </label>
+      <label>
+        Date de fin:
+        <input type="date" id="editEndDate">
+      </label>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:10px;">
+        <button class="secondary" onclick="closeModal()">Annuler</button>
+        <button onclick="saveModalEdit()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'shelf-library-data';
+    
+    // Hex colors for immediate cross-browser gradient support
+    const PALETTE = [
+      '#7B2D3E', '#2C6E6B', '#B4552D', '#34495E',
+      '#8A6D1F', '#4B3B47', '#2A4D69', '#8E44AD',
+      '#16A085', '#D35400', '#27AE60', '#5D4037'
+    ];
+
+    let data = { books: [], dailyLog: {}, sessions: [], settings: { pagesPerHour: 70, hoursPerDay: 1.5 } };
+
+    function getRandomColor() {
+      return PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    }
+
+    function todayKey(){
+      const d = new Date();
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    }
+
+    function load(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw){
+          data = JSON.parse(raw);
+          if(!data.settings) data.settings = { pagesPerHour: 70, hoursPerDay: 1.5 };
+          if(!data.dailyLog) data.dailyLog = {};
+          if(!data.sessions) data.sessions = [];
+          if(!data.books) data.books = [];
+
+          data.books.forEach(b => {
+            if(!b.color) b.color = getRandomColor();
+          });
+        }
+      }catch(e){}
+      render();
+    }
+
+    function save(){
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      }catch(e){
+        console.error('Erreur de sauvegarde', e);
+      }
+    }
+
+    function toggleDateFields(){
+      const shelfVal = document.getElementById('newShelf').value;
+      const startWrapper = document.getElementById('startDateWrapper');
+      const endWrapper = document.getElementById('endDateWrapper');
+
+      if(shelfVal === 'reading'){
+        startWrapper.style.display = 'inline-block';
+        endWrapper.style.display = 'none';
+      } else if(shelfVal === 'completed'){
+        startWrapper.style.display = 'inline-block';
+        endWrapper.style.display = 'inline-block';
+      } else {
+        startWrapper.style.display = 'none';
+        endWrapper.style.display = 'none';
+      }
+    }
+
+    function addBook(){
+      const titleEl = document.getElementById('newTitle');
+      const authorEl = document.getElementById('newAuthor');
+      const pagesEl = document.getElementById('newPages');
+      const shelfEl = document.getElementById('newShelf');
+      const startDateEl = document.getElementById('newStartDate');
+      const endDateEl = document.getElementById('newEndDate');
+      
+      const title = titleEl.value.trim();
+      const author = authorEl.value.trim();
+      const pages = parseInt(pagesEl.value, 10);
+      const shelfChoice = shelfEl.value;
+      
+      if(!title || !pages || pages <= 0){
+        alert('Veuillez entrer un titre et un nombre de pages valide.');
+        return;
+      }
+
+      let initialPage = 0;
+      let startDate = startDateEl.value || null;
+      let endDate = endDateEl.value || null;
+
+      if(shelfChoice === 'completed'){
+        initialPage = pages;
+      } else if(shelfChoice === 'reading'){
+        initialPage = 1;
+      }
+      
+      data.books.push({ 
+        id: Date.now().toString(36), 
+        title, 
+        author,
+        pages, 
+        currentPage: initialPage,
+        startDate: startDate,
+        endDate: endDate,
+        color: getRandomColor()
+      });
+      
+      titleEl.value = '';
+      authorEl.value = '';
+      pagesEl.value = '';
+      startDateEl.value = '';
+      endDateEl.value = '';
+      shelfEl.value = 'toRead';
+      toggleDateFields();
+      save();
+      render();
+    }
+
+    function setCurrentPage(id){
+      const book = data.books.find(b => b.id === id);
+      if(!book) return;
+
+      const pageVal = document.getElementById(`page-${id}`).value;
+      const timeVal = parseFloat(document.getElementById(`time-${id}`).value) || 0;
+      const timeUnit = document.getElementById(`unit-${id}`).value;
+
+      const newVal = Math.min(book.pages, Math.max(0, parseInt(pageVal, 10) || 0));
+      const delta = newVal - book.currentPage;
+
+      if(newVal >= book.pages && !book.endDate){
+        book.endDate = todayKey();
+      } else if(newVal < book.pages && book.endDate){
+        book.endDate = null;
+      }
+
+      book.currentPage = newVal;
+
+      if(delta !== 0){
+        const key = todayKey();
+        data.dailyLog[key] = (data.dailyLog[key] || 0) + delta;
+        
+        const minutes = timeUnit === 'hours' ? timeVal * 60 : timeVal;
+        
+        if(delta > 0 && minutes > 0){
+          data.sessions.push({ date: key, pages: delta, minutes });
+        }
+      }
+      
+      save();
+      render();
+    }
+
+    function markDone(id){
+      const book = data.books.find(b => b.id === id);
+      if(!book) return;
+      const remaining = book.pages - book.currentPage;
+
+      book.endDate = todayKey();
+      book.currentPage = book.pages;
+      
+      if(remaining > 0){
+        const key = todayKey();
+        data.dailyLog[key] = (data.dailyLog[key] || 0) + remaining;
+      }
+      save();
+      render();
+    }
+
+    function deleteBook(id){
+      if(!confirm('Supprimer ce livre ?')) return;
+      data.books = data.books.filter(b => b.id !== id);
+      save();
+      render();
+    }
+
+    function saveSettings(){
+      const pph = parseFloat(document.getElementById('pagesPerHour').value);
+      const hpd = parseFloat(document.getElementById('hoursPerDay').value);
+      data.settings.pagesPerHour = pph > 0 ? pph : data.settings.pagesPerHour;
+      data.settings.hoursPerDay = hpd > 0 ? hpd : data.settings.hoursPerDay;
+      save();
+      render();
+    }
+
+    function openEditModal(id){
+      const book = data.books.find(b => b.id === id);
+      if(!book) return;
+      
+      document.getElementById('editBookId').value = book.id;
+      document.getElementById('editTitle').value = book.title;
+      document.getElementById('editAuthor').value = book.author || '';
+      document.getElementById('editPages').value = book.pages;
+      document.getElementById('editStartDate').value = book.startDate || '';
+      document.getElementById('editEndDate').value = book.endDate || '';
+      document.getElementById('editModal').style.display = 'flex';
+    }
+
+    function closeModal(){
+      document.getElementById('editModal').style.display = 'none';
+    }
+
+    function saveModalEdit(){
+      const id = document.getElementById('editBookId').value;
+      const book = data.books.find(b => b.id === id);
+      if(!book) return;
+
+      const newTitle = document.getElementById('editTitle').value.trim();
+      const newAuthor = document.getElementById('editAuthor').value.trim();
+      const newPages = parseInt(document.getElementById('editPages').value, 10);
+      const newStartDate = document.getElementById('editStartDate').value;
+      const newEndDate = document.getElementById('editEndDate').value;
+
+      if(newTitle) book.title = newTitle;
+      book.author = newAuthor;
+      if(newPages && newPages >= book.currentPage) book.pages = newPages;
+      book.startDate = newStartDate || null;
+      book.endDate = newEndDate || null;
+
+      closeModal();
+      save();
+      render();
+    }
+
+    function computeStats(){
+      const totalPages = data.books.reduce((s,b) => s + b.pages, 0);
+      const readPages = data.books.reduce((s,b) => s + b.currentPage, 0);
+      const remaining = totalPages - readPages;
+      const booksDone = data.books.filter(b => b.currentPage >= b.pages && b.pages > 0).length;
+
+      const totalSessionsPages = data.sessions.reduce((s,x) => s + x.pages, 0);
+      const totalSessionMinutes = data.sessions.reduce((s,x) => s + x.minutes, 0);
+      const measuredPagesPerHour = totalSessionMinutes > 0 ? totalSessionsPages / (totalSessionMinutes / 60) : null;
+      const speedForEstimate = measuredPagesPerHour != null ? measuredPagesPerHour : data.settings.pagesPerHour;
+
+      const settingsPacePerDay = speedForEstimate * data.settings.hoursPerDay;
+      const estDaysSettings = settingsPacePerDay > 0 ? remaining / settingsPacePerDay : null;
+
+      const logDates = Object.keys(data.dailyLog);
+      let calendarPace = null;
+      if(logDates.length > 0){
+        const totalLogged = Object.values(data.dailyLog).reduce((s,v) => s+v, 0);
+        const sortedDates = logDates.slice().sort();
+        const first = new Date(sortedDates[0]);
+        const now = new Date();
+        const daysSpan = Math.max(1, Math.round((now - first) / 86400000) + 1);
+        calendarPace = totalLogged / daysSpan;
+      }
+      const estDaysActual = (calendarPace && calendarPace > 0) ? remaining / calendarPace : null;
+
+      return { totalPages, readPages, remaining, booksDone, estDaysSettings, estDaysActual, calendarPace, measuredPagesPerHour };
+    }
+
+    function formatDateInDays(days){
+      const d = new Date();
+      d.setDate(d.getDate() + Math.round(days));
+      return d.toLocaleDateString(undefined, { year:'numeric', month:'long', day:'numeric' });
+    }
+
+    function createSpineHtml(b){
+      const width = Math.min(90, Math.max(26, Math.round(b.pages / 8)));
+      const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
+      
+      if (!b.color) {
+        b.color = getRandomColor();
+      }
+      
+      const color = b.color;
+      const unreadColor = '#5B5847';
+
+      let bg;
+      if (pct === 0 || pct >= 100) {
+        bg = color;
+      } else {
+        bg = `linear-gradient(to top, ${color} ${pct}%, ${unreadColor} ${pct}%)`;
+      }
+
+      const authorLabel = b.author ? ` par ${escapeHtml(b.author)}` : '';
+
+      return `<div class="spine" onclick="openEditModal('${b.id}')" style="width:${width}px; background:${bg};" title="${escapeHtml(b.title)}${authorLabel} — ${pct}% lu">
+        <span class="title-text">${escapeHtml(b.title)}</span>
+      </div>`;
+    }
+
+    function render(){
+      const stats = computeStats();
+      const total = data.books.length;
+
+      document.getElementById('stats').innerHTML = `
+        <div class="stat"><div class="num">${total}</div><div class="label">livres au total</div></div>
+        <div class="stat"><div class="num">${stats.booksDone}</div><div class="label">terminés</div></div>
+        <div class="stat"><div class="num">${stats.readPages.toLocaleString()}</div><div class="label">pages lues</div></div>
+        <div class="stat"><div class="num">${stats.remaining.toLocaleString()}</div><div class="label">pages restantes</div></div>
+        <div class="stat"><div class="num">${stats.measuredPagesPerHour != null ? stats.measuredPagesPerHour.toFixed(0) : '—'}</div><div class="label">pages/heure mesurées</div></div>
+      `;
+
+      let finishHtml = '';
+      if(total === 0){
+        finishHtml = '<span class="empty-note">Ajoutez des livres pour voir l\'estimation de fin.</span>';
+      } else {
+        const speedLabel = stats.measuredPagesPerHour != null
+          ? `votre vitesse (${stats.measuredPagesPerHour.toFixed(0)} p/h)`
+          : `la vitesse par défaut (${data.settings.pagesPerHour} p/h)`;
+        finishHtml += `<div class="row"><span class="who">Basé sur ${speedLabel} × ${data.settings.hoursPerDay} h/jour</span><span class="when">${stats.estDaysSettings != null ? formatDateInDays(stats.estDaysSettings) : '—'}</span></div>`;
+        if(stats.estDaysActual != null){
+          finishHtml += `<div class="row"><span class="who">Basé sur votre rythme calendaire (${stats.calendarPace.toFixed(1)} p/jour)</span><span class="when">${formatDateInDays(stats.estDaysActual)}</span></div>`;
+        }
+      }
+      document.getElementById('finishBlock').innerHTML = finishHtml;
+
+      const readingBooks = data.books.filter(b => b.currentPage > 0 && b.currentPage < b.pages);
+      const toReadBooks = data.books.filter(b => b.currentPage === 0);
+      const completedBooks = data.books.filter(b => b.currentPage >= b.pages && b.pages > 0);
+
+      document.getElementById('shelfReading').innerHTML = readingBooks.length > 0 
+        ? readingBooks.map(b => createSpineHtml(b)).join('') 
+        : '<div class="shelf-empty">Aucun livre en cours.</div>';
+
+      document.getElementById('shelfToRead').innerHTML = toReadBooks.length > 0 
+        ? toReadBooks.map(b => createSpineHtml(b)).join('') 
+        : '<div class="shelf-empty">La pile à lire est vide !</div>';
+
+      document.getElementById('shelfCompleted').innerHTML = completedBooks.length > 0 
+        ? completedBooks.map(b => createSpineHtml(b)).join('') 
+        : '<div class="shelf-empty">Aucun livre terminé pour le moment.</div>';
+
+      const bookList = document.getElementById('bookList');
+      if(total === 0){
+        bookList.innerHTML = '<p class="empty-note">Aucun livre enregistré.</p>';
+      } else {
+        bookList.innerHTML = data.books.map(b => {
+          const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
+          const finished = b.currentPage >= b.pages;
+          
+          let dateInfo = '';
+          if(finished){
+            if(b.startDate && b.endDate){
+              dateInfo = ` • Lu du ${b.startDate} au ${b.endDate}`;
+            } else if(b.endDate){
+              dateInfo = ` • Terminé le ${b.endDate}`;
+            } else if(b.startDate){
+              dateInfo = ` • Débuté le ${b.startDate}`;
+            }
+          } else if(b.startDate){
+            dateInfo = ` • Débuté le ${b.startDate}`;
+          }
+
+          const authorText = b.author ? ` <span class="author-text">par ${escapeHtml(b.author)}</span>` : '';
+
+          return `<div class="book-row">
+            <div class="info">
+              <h4>${escapeHtml(b.title)}${authorText}</h4>
+              <div class="meta">${finished ? 'Terminé' : pct + '% lu'} — page ${b.currentPage} sur ${b.pages}${dateInfo}</div>
+              <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+            </div>
+            <div class="controls">
+              <label for="page-${b.id}">Page :</label>
+              <input type="number" id="page-${b.id}" value="${b.currentPage}" min="0" max="${b.pages}">
+              
+              <label>Durée :</label>
+              <div class="time-input-group">
+                <input type="number" id="time-${b.id}" placeholder="0" min="0" step="any">
+                <select id="unit-${b.id}">
+                  <option value="minutes">min</option>
+                  <option value="hours">heures</option>
+                </select>
+              </div>
+
+              <button class="secondary" onclick="setCurrentPage('${b.id}')">Mettre à jour</button>
+            </div>
+            <div class="row-actions">
+              <button class="ghost" onclick="markDone('${b.id}')">Terminer</button>
+              <button class="ghost" onclick="deleteBook('${b.id}')">Supprimer</button>
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      document.getElementById('pagesPerHour').value = data.settings.pagesPerHour;
+      document.getElementById('hoursPerDay').value = data.settings.hoursPerDay;
+    }
+
+    function escapeHtml(str){
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    load();
+  </script>
+</body>
+</html>
