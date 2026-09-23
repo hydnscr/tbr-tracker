@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ma Bibliothèque</title>
   <link rel="stylesheet" href="style.css">
+  <!-- Librairie pour la célébration (confettis) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 </head>
 <body>
 
@@ -190,6 +192,23 @@
       }
     }
 
+    function triggerCelebration(bookId) {
+      // Confettis
+      if (typeof confetti === 'function') {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      }
+      // Animation visuelle de la tranche
+      const spineEl = document.getElementById(`spine-${bookId}`);
+      if (spineEl) {
+        spineEl.classList.add('spine-celebrate');
+        setTimeout(() => spineEl.classList.remove('spine-celebrate'), 600);
+      }
+    }
+
     function toggleDateFields(){
       const shelfVal = document.getElementById('newShelf').value;
       const startWrapper = document.getElementById('startDateWrapper');
@@ -269,6 +288,7 @@
 
       const newVal = Math.min(book.pages, Math.max(0, parseInt(pageVal, 10) || 0));
       const delta = newVal - book.currentPage;
+      const wasFinished = book.currentPage >= book.pages;
 
       if(newVal >= book.pages && !book.endDate){
         book.endDate = todayKey();
@@ -292,6 +312,12 @@
           data.sessions.push({ date: key, pages: delta, minutes });
         }
       }
+
+      // Célébration si le livre vient d'être terminé
+      const isFinishedNow = book.currentPage >= book.pages;
+      if (isFinishedNow && !wasFinished) {
+        triggerCelebration(book.id);
+      }
       
       save();
       render();
@@ -310,6 +336,8 @@
         const key = todayKey();
         data.dailyLog[key] = (data.dailyLog[key] || 0) + remaining;
       }
+      
+      triggerCelebration(id);
       save();
       render();
     }
@@ -407,6 +435,7 @@
       const readPages = data.books.reduce((s,b) => s + b.currentPage, 0);
       const remaining = totalPages - readPages;
       const booksDone = data.books.filter(b => b.currentPage >= b.pages && b.pages > 0).length;
+      const booksRemaining = data.books.length - booksDone;
 
       const totalSessionsPages = data.sessions.reduce((s,x) => s + x.pages, 0);
       const totalSessionMinutes = data.sessions.reduce((s,x) => s + x.minutes, 0);
@@ -428,7 +457,7 @@
       }
       const estDaysActual = (calendarPace && calendarPace > 0) ? remaining / calendarPace : null;
 
-      return { totalPages, readPages, remaining, booksDone, estDaysSettings, estDaysActual, calendarPace, measuredPagesPerHour };
+      return { totalPages, readPages, remaining, booksDone, booksRemaining, estDaysSettings, estDaysActual, calendarPace, measuredPagesPerHour };
     }
 
     function formatDateInDays(days){
@@ -438,7 +467,9 @@
     }
 
     function createSpineHtml(b){
-      const width = Math.min(90, Math.max(26, Math.round(b.pages / 8)));
+      // Largeur basée dynamiquement sur le nombre de pages (ex: 200p = 20px -> ajusté entre 24px et 80px)
+      const calculatedWidth = Math.round(b.pages / 10);
+      const width = Math.min(80, Math.max(24, calculatedWidth));
       const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
       
       if (!b.color) {
@@ -457,7 +488,7 @@
 
       const authorLabel = b.author ? ` par ${escapeHtml(b.author)}` : '';
 
-      return `<div class="spine" onclick="openEditModal('${b.id}')" style="width:${width}px; background:${bg};" title="${escapeHtml(b.title)}${authorLabel} — ${pct}% lu">
+      return `<div class="spine" id="spine-${b.id}" onclick="openEditModal('${b.id}')" style="width:${width}px; background:${bg};" title="${escapeHtml(b.title)}${authorLabel} — ${pct}% lu">
         <span class="title-text">${escapeHtml(b.title)}</span>
       </div>`;
     }
@@ -472,17 +503,15 @@
         return;
       }
 
-      // 1. Sort books: "Reading" at the top, "To Read" in middle, "Completed" at the bottom
       const sortedBooks = [...data.books].sort((a, b) => {
         const getPriority = (book) => {
-          if (book.currentPage >= book.pages && book.pages > 0) return 3; // Finished -> Bottom
-          if (book.currentPage > 0) return 1;                            // Reading -> Top
-          return 2;                                                      // To Read -> Middle
+          if (book.currentPage >= book.pages && book.pages > 0) return 3;
+          if (book.currentPage > 0) return 1;
+          return 2;
         };
         return getPriority(a) - getPriority(b);
       });
 
-      // 2. Filter by search query
       const filteredBooks = sortedBooks.filter(b => {
         const titleMatch = b.title.toLowerCase().includes(query);
         const authorMatch = b.author ? b.author.toLowerCase().includes(query) : false;
@@ -548,6 +577,7 @@
 
       document.getElementById('stats').innerHTML = `
         <div class="stat"><div class="num">${total}</div><div class="label">livres au total</div></div>
+        <div class="stat"><div class="num">${stats.booksRemaining}</div><div class="label">livres restants</div></div>
         <div class="stat"><div class="num">${stats.booksDone}</div><div class="label">terminés</div></div>
         <div class="stat"><div class="num">${stats.readPages.toLocaleString()}</div><div class="label">pages lues</div></div>
         <div class="stat"><div class="num">${stats.remaining.toLocaleString()}</div><div class="label">pages restantes</div></div>
