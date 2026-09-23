@@ -193,7 +193,6 @@
     }
 
     function triggerCelebration(bookId) {
-      // Confettis
       if (typeof confetti === 'function') {
         confetti({
           particleCount: 80,
@@ -201,7 +200,6 @@
           origin: { y: 0.6 }
         });
       }
-      // Animation visuelle de la tranche
       const spineEl = document.getElementById(`spine-${bookId}`);
       if (spineEl) {
         spineEl.classList.add('spine-celebrate');
@@ -313,7 +311,6 @@
         }
       }
 
-      // Célébration si le livre vient d'être terminé
       const isFinishedNow = book.currentPage >= book.pages;
       if (isFinishedNow && !wasFinished) {
         triggerCelebration(book.id);
@@ -467,9 +464,11 @@
     }
 
     function createSpineHtml(b){
-      // Largeur basée dynamiquement sur le nombre de pages (ex: 200p = 20px -> ajusté entre 24px et 80px)
-      const calculatedWidth = Math.round(b.pages / 10);
-      const width = Math.min(80, Math.max(24, calculatedWidth));
+      // Échelle dynamique : 100 pages = 10px d'épaisseur (ex: 800p = 80px, 1200p = 120px)
+      const pagesCount = (b.pages && b.pages > 0) ? b.pages : 1;
+      const baseWidth = Math.round((pagesCount / 100) * 10);
+      const width = Math.max(18, baseWidth);
+      
       const pct = b.pages > 0 ? Math.round((b.currentPage / b.pages) * 100) : 0;
       
       if (!b.color) {
